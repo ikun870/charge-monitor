@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>充电桩数据分析面板 · 硕丰/主楼/学子</title>
+<script src="data.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+  :root { --accent:#3E7CB1; --text:#1A1B1C; --sec:#6B7280; --bg:#F4F3EE; --card:#fff; --line:#E4E3DD; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family:'Roboto','PingFang SC','Segoe UI',Arial,sans-serif; background:var(--bg); color:var(--text); line-height:1.5; }
+  .wrap { max-width:1080px; margin:0 auto; padding:20px 16px 40px; }
+  h1 { font-size:22px; font-weight:700; }
+  .sub { color:var(--sec); font-size:13px; margin-top:4px; }
+  .cards { display:flex; gap:14px; flex-wrap:wrap; margin:20px 0 8px; }
+  .card { flex:1 1 240px; min-width:0; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+  .card .k { font-size:12px; color:var(--sec); }
+  .card .v { font-size:24px; font-weight:700; margin-top:6px; }
+  .card .s { font-size:12px; color:var(--sec); margin-top:4px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-top:16px; }
+  .panel h2 { font-size:16px; font-weight:600; margin-bottom:4px; }
+  .panel .note { font-size:12px; color:var(--sec); margin-bottom:10px; }
+  .chart { width:100%; height:320px; min-width:0; }
+  .chart.short { height:300px; }
+  .tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .tab { border:1px solid var(--line); background:#fff; border-radius:999px; padding:6px 16px; font-size:13px; cursor:pointer; }
+  .tab.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+  th, td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--sec); font-weight:500; font-size:12px; }
+  td.num { text-align:right; font-variant-numeric: tabular-nums; }
+  .empty { color:var(--sec); font-size:13px; padding:20px 0; text-align:center; }
+  .foot { color:var(--sec); font-size:12px; margin-top:20px; text-align:center; }
+  @media (max-width:560px){ .chart{height:280px;} h1{font-size:19px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔌 充电桩数据分析面板</h1>
+  <div class="sub" id="meta-line">数据生成中…</div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <h2>24 小时占用率曲线（高峰期 / 低峰期）</h2>
+    <div class="note">横轴为本地时间小时；占用率 = 被占用的插座采样占比。曲线越高代表该时段越难抢到桩。</div>
+    <div class="chart" id="chart-occ"></div>
+  </div>
+
+  <div class="panel">
+    <h2>平均充电时长 vs 平均空闲时长</h2>
+    <div class="note">充电时长：插座从被占用到释放的分钟数；空闲时长：释放后到再次被占用的分钟数。</div>
+    <div class="chart" id="chart-dur"></div>
+  </div>
+
+  <div class="panel">
+    <h2>使用热度热力图（星期 × 小时）</h2>
+    <div class="note">颜色越深代表该时段占用率越高。最直观地看出"什么时候去必扑空"。</div>
+    <div class="tabs" id="heat-tabs"></div>
+    <div class="chart" id="chart-heat"></div>
+  </div>
+
+  <div class="panel">
+    <h2>站点对比</h2>
+    <div class="note">按平均占用率降序。占用率越高、充电越久，越需要提前蹲守。</div>
+    <div style="overflow-x:auto;">
+      <table id="station-table">
+        <thead><tr><th>地点</th><th>站点</th><th class="num">插座数</th><th class="num">平均占用率</th><th class="num">平均充电时长(分)</th><th class="num">累计释放次数</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="foot">数据由常驻监控服务每 1–5 分钟采集；本地静态页面，双击即可打开。⚠️ 数据量积累越多，统计越准确。</div>
+</div>
+
+<script>
+(function () {
+  var D = window.DASHBOARD_DATA;
+  if (!D || !D.places) { document.getElementById('meta-line').textContent = '未找到数据文件 data.js，请先运行 python scripts/gen_dashboard.py 生成。'; return; }
+  if (typeof echarts === 'undefined') { document.getElementById('meta-line').textContent = 'ECharts 库加载失败（可能离线）。请联网后刷新，或手动下载 echarts.min.js 放到本目录。'; return; }
+
+  var P = D.places;
+  var order = ['shuofeng', 'zhulou', 'xuezi'];
+  var names = order.map(function (c) { return P[c].name; });
+  var ACC = '#3E7CB1', OCC = '#EA6668', IDLE = '#52C41A';
+  var pal = ['#3E7CB1', '#E1B98F', '#94D8C3'];
+
+  document.getElementById('meta-line').textContent =
+    '覆盖 ' + D.days + ' 天 · 快照 ' + (D.snapshot_count||0).toLocaleString() + ' 行 · 状态变化 ' + D.total_events + ' 次 · 数据截至 ' + (D.data_until||D.generated_at) + '（标准北京时间）· 已剔除停机等未记录时段';
+
+  // 概览卡片
+  var cards = document.getElementById('cards');
+  order.forEach(function (c, i) {
+    var p = P[c];
+    var el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML =
+      '<div class="k" style="color:'+pal[i]+'">' + p.name + '</div>' +
+      '<div class="v">' + (p.charge_24h != null ? p.charge_24h : '-') + '<span style="font-size:13px;color:#6B7280;font-weight:400"> 次 / 24h 充电' +
+        (p.coverage_24h != null && p.coverage_24h < 24 ? '（监控覆盖 ' + p.coverage_24h + '/24h）' : '') + '</span></div>' +
+      '<div class="s">平均占用率 ' + avgOcc(p) + '% · 日转 ' + p.turnover_per_day + ' 次/桩 · 有效 ' + (p.eff_days||0) + ' 天</div>';
+    cards.appendChild(el);
+  });
+
+  function avgOcc(p) {
+    var hs = p.occupancy_by_hour.filter(function (x) { return x != null; });
+    if (!hs.length) return '-';
+    return Math.round(hs.reduce(function (a, b) { return a + b; }, 0) / hs.length * 1000) / 10;
+  }
+
+  // 1) 占用率折线
+  var occChart = echarts.init(document.getElementById('chart-occ'));
+  occChart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis', confine: true, valueFormatter: function (v) { return v == null ? '-' : (v*100).toFixed(0) + '%'; } },
+    legend: { top: 0, textStyle: { fontSize: 12 } },
+    grid: { left: 44, right: 16, top: 36, bottom: 28 },
+    xAxis: { type: 'category', data: hours(), name: '时', axisLabel: { fontSize: 11, color: '#555' } },
+    yAxis: { type: 'value', max: 1, name: '占用率', axisLabel: { fontSize: 11, color: '#555', formatter: function (v) { return (v*100).toFixed(0) + '%'; } } },
+    series: order.map(function (c, i) {
+      return { name: P[c].name, type: 'line', smooth: true, symbolSize: 5, data: P[c].occupancy_by_hour,
+               lineStyle: { width: 2.5, color: pal[i] }, itemStyle: { color: pal[i] },
+               connectNulls: true };
+    })
+  });
+
+  // 2) 时长对比
+  var durChart = echarts.init(document.getElementById('chart-dur'));
+  durChart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis', confine: true, valueFormatter: function (v) { return v == null ? '-' : v + ' 分钟'; } },
+    legend: { top: 0, textStyle: { fontSize: 12 } },
+    grid: { left: 48, right: 16, top: 36, bottom: 28 },
+    xAxis: { type: 'category', data: names, axisLabel: { fontSize: 12, color: '#555' } },
+    yAxis: { type: 'value', name: '分钟', axisLabel: { fontSize: 11, color: '#555' } },
+    series: [
+      { name: '平均充电时长', type: 'bar', data: order.map(function (c) { return P[c].avg_charge_min; }), itemStyle: { color: OCC, borderRadius: [6,6,0,0] } },
+      { name: '平均空闲时长', type: 'bar', data: order.map(function (c) { return P[c].avg_idle_min; }), itemStyle: { color: IDLE, borderRadius: [6,6,0,0] } }
+    ]
+  });
+
+  // 3) 热力图
+  var heatIdx = 0;
+  var heatTabs = document.getElementById('heat-tabs');
+  order.forEach(function (c, i) {
+    var b = document.createElement('button');
+    b.className = 'tab' + (i === 0 ? ' on' : '');
+    b.textContent = P[c].name;
+    b.onclick = function () {
+      heatIdx = i;
+      heatTabs.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      renderHeat();
+    };
+    heatTabs.appendChild(b);
+  });
+  var heatChart = echarts.init(document.getElementById('chart-heat'));
+  function renderHeat() {
+    var p = P[order[heatIdx]];
+    var cells = [];
+    for (var w = 0; w < 7; w++) for (var h = 0; h < 24; h++) {
+      var v = p.heatmap[w][h];
+      cells.push([h, w, v]);
+    }
+    heatChart.setOption({
+      backgroundColor: 'transparent',
+      tooltip: { confine: true, formatter: function (pr) { var x = pr.value; return ['周' + ['日','一','二','三','四','五','六'][x[1]], x[0] + ' 时', (x[2] * 100).toFixed(0) + '% 占用'].join('<br/>'); } },
+      grid: { left: 44, right: 16, top: 20, bottom: 48 },
+      xAxis: { type: 'category', data: hours(), splitArea: { show: true }, axisLabel: { fontSize: 11, color: '#555' } },
+      yAxis: { type: 'category', data: ['周日','周一','周二','周三','周四','周五','周六'], splitArea: { show: true }, axisLabel: { fontSize: 11, color: '#555' } },
+      visualMap: { min: 0, max: 1, calculable: false, orient: 'horizontal', left: 'center', bottom: 0,
+                   text: ['高','低'], textStyle: { fontSize: 11, color: '#555' },
+                   inRange: { color: ['#EAF3FB', '#3E7CB1', '#C0392B'] } },
+      series: [{ type: 'heatmap', data: cells, label: { show: false } }]
+    });
+  }
+  renderHeat();
+
+  // 4) 站点表
+  var tb = document.querySelector('#station-table tbody');
+  (D.station_table || []).forEach(function (r) {
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + r.place + '</td><td>' + r.station + '</td>' +
+      '<td class="num">' + r.outlets + '</td>' +
+      '<td class="num">' + r.occupancy + '%</td>' +
+      '<td class="num">' + (r.avg_charge_min != null ? r.avg_charge_min : '-') + '</td>' +
+      '<td class="num">' + r.releases + '</td>';
+    tb.appendChild(tr);
+  });
+
+  function hours() { var a = []; for (var i = 0; i < 24; i++) a.push(i + '时'); return a; }
+
+  window.addEventListener('resize', function () { occChart.resize(); durChart.resize(); heatChart.resize(); });
+})();
+</script>
+</body>
+</html>

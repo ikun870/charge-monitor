@@ -1,0 +1,29 @@
+{
+  "qq": {
+    "appid": "在这里填 QQ 开放平台的 AppID",
+    "secret": "在这里填 QQ 开放平台的 AppSecret",
+    "is_sandbox": true,
+    "allow_openids": []
+  },
+  "monitor": {
+    "poll_interval_seconds": 45,
+    "collect_interval_seconds": 180,
+    "collect_night_interval_seconds": 360,
+    "collect_night_start_hour": 1,
+    "collect_night_end_hour": 8,
+    "session_timeout_minutes": 360,
+    "snapshot_keep_days": 90
+  },
+  "api": {
+    "base_url": "https://wemp.issks.com",
+    "center_wgs84": [30.757064, 103.933993],
+    "request_timeout_seconds": 10,
+    "fault_error_threshold": 5
+  },
+  "maps": {
+    "zhulou": "https://...（可选）主楼C区停车场位置图的公网图片 URL",
+    "shuofeng": "https://...（可选）硕丰十组团位置图的公网图片 URL",
+    "xuezi": "https://...（可选）学子餐厅位置图的公网图片 URL"
+  },
+  "data_dir": "data"
+}

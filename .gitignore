@@ -1,0 +1,20 @@
+# 凭据与个人配置（绝不入库）
+config.json
+botpy.log*
+
+# 运行数据（含个人充电行为数据）
+data/
+release_package/
+charge-monitor-release.zip
+
+# 生成产物（面板数据由 gen_dashboard.py 生成）
+dashboard/data.js
+
+# 原始中文名地图目录（仓库使用 maps/ 英文名副本）
+充电桩地图/
+
+# Python / 工具产物
+__pycache__/
+*.pyc
+.preview/
+.venv/
